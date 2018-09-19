@@ -6,7 +6,9 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"github.com/bitly/go-simplejson"
 	"io"
 	"io/ioutil"
 	"net"
@@ -89,6 +91,8 @@ type options struct {
 
 	// @Default 10
 	RetryInterval uint `mapstructure:"retry_interval"`
+	App string `mapstructure:"app" validate:"required"`
+	Type string `mapstructure:"type" validate:"required"`
 
 	// Add any number of arbitrary tags to your event. There is no default value for this setting.
 	// This can help with processing later. Tags can be dynamic and include parts of the event using the %{field} syntax.
@@ -222,6 +226,22 @@ func (b *batch) Fire(notifier muster.Notifier) {
 }
 
 func (b *batch) send(body []byte) (retry bool, err error) {
+	buff := bytes.NewBuffer(body)
+	global := simplejson.New()
+	global.Set("__app", b.p.opt.App)
+	global.Set("__type", b.p.opt.Type)
+	var arr []interface{}
+	for {
+		bys, err := buff.ReadBytes('\n')
+		if err != nil {
+			break
+		}
+		j, _ := simplejson.NewJson(bys)
+		arr = append(arr, j.Get("data").MustArray()...)
+	}
+	global.Set("data", arr)
+	body, _ = json.Marshal(global)
+
 	req, err := http.NewRequest(b.p.opt.HTTPMethod, *b.url, bytes.NewBuffer(body))
 	if err != nil {
 		return false, fmt.Errorf("Create request failed with: %v", err)
