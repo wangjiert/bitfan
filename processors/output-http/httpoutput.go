@@ -131,7 +131,7 @@ func (p *processor) Start(e processors.IPacket) error {
 			Timeout:   time.Duration(p.opt.ConnectTimeout) * time.Second,
 			KeepAlive: time.Duration(time.Second * 300),
 		}).Dial,
-		TLSClientConfig:       &tls.Config{},
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		DisableCompression:    true,
 		DisableKeepAlives:     !p.opt.KeepAlive,
 		MaxIdleConns:          p.opt.PoolMax,
@@ -226,6 +226,7 @@ func (b *batch) send(body []byte) (retry bool, err error) {
 	if err != nil {
 		return false, fmt.Errorf("Create request failed with: %v", err)
 	}
+
 	defer req.Body.Close()
 	for hName, hValue := range b.headers {
 		req.Header.Set(hName, hValue)
@@ -234,6 +235,8 @@ func (b *batch) send(body []byte) (retry bool, err error) {
 	if err != nil {
 		return true, fmt.Errorf("Send request failed with: %v", err)
 	}
+	bys, _ := ioutil.ReadAll(resp.Body)
+	fmt.Println("result:", string(bys))
 	defer resp.Body.Close()
 
 	io.Copy(ioutil.Discard, resp.Body)
