@@ -205,67 +205,69 @@ func (p *processor) Receive(e processors.IPacket) error {
 
 	p.Logger.Debugf("db.Query - %s", reqs[len(reqs)-1])
 
-	total := batchSize
 	maps := p.getsqlType()
-	for total == batchSize {
-		total = 0
-		rows, err := p.db.Query(reqs[len(reqs)-1] + fmt.Sprint(" limit ", p.opt.Offset, ",", batchSize))
+	total := 0
+
+	rows, err := p.db.Query(reqs[len(reqs)-1] + fmt.Sprint(" limit ", p.opt.Offset, ",", batchSize))
+	if err != nil {
+		return err
+	}
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+
+	var records []map[string]interface{}
+	scanArgs := make([]interface{}, len(columns))
+	values := make([]interface{}, len(columns))
+	for i := range values {
+		scanArgs[i] = &values[i]
+	}
+
+	for rows.Next() {
+		total++
+		record := make(map[string]interface{})
+		err = rows.Scan(scanArgs...)
 		if err != nil {
 			return err
 		}
-
-		columns, err := rows.Columns()
-		if err != nil {
-			return err
-		}
-
-		var records []map[string]interface{}
-		scanArgs := make([]interface{}, len(columns))
-		values := make([]interface{}, len(columns))
-		for i := range values {
-			scanArgs[i] = &values[i]
-		}
-
-		for rows.Next() {
-			total++
-			record := make(map[string]interface{})
-			err = rows.Scan(scanArgs...)
-			if err != nil {
-				return err
-			}
-			for i, col := range values {
-				if col != nil {
-					// fmt.Printf("\n%s: type= %s\n", columns[i], reflect.TypeOf(col))
-					switch t := col.(type) {
-					default:
-						fmt.Printf("Unexpected type %T\n", t)
-					case bool:
-						record[columns[i]] = col.(bool)
-					case int:
-						record[columns[i]] = col.(int)
-					case int64:
-						record[columns[i]] = col.(int64)
-					case float64:
-						record[columns[i]] = col.(float64)
-					case string:
-						record[columns[i]] = col.(string)
-					case []byte: // -- all cases go HERE!
-						record[columns[i]] = getGoValue(maps[columns[i]], string(col.([]byte)))
-						//case time.Time:
-						// record[columns[i]] = col.(string)
-					}
+		for i, col := range values {
+			if col != nil {
+				// fmt.Printf("\n%s: type= %s\n", columns[i], reflect.TypeOf(col))
+				switch t := col.(type) {
+				default:
+					fmt.Printf("Unexpected type %T\n", t)
+				case bool:
+					record[columns[i]] = col.(bool)
+				case int:
+					record[columns[i]] = col.(int)
+				case int64:
+					record[columns[i]] = col.(int64)
+				case float64:
+					record[columns[i]] = col.(float64)
+				case string:
+					record[columns[i]] = col.(string)
+				case []byte: // -- all cases go HERE!
+					record[columns[i]] = getGoValue(maps[columns[i]], string(col.([]byte)))
+					//case time.Time:
+					// record[columns[i]] = col.(string)
 				}
 			}
+		}
 
-			if p.opt.Time != "" {
-				if _, ok := record[p.opt.Time].(int64); ok {
-					record["__time"] = record[p.opt.Time]
-				} else if timeStr, ok := record[p.opt.Time].(string); ok {
+		if p.opt.Time != "" {
+			if _, ok := record[p.opt.Time].(int64); ok {
+				record["__time"] = record[p.opt.Time]
+			} else if timeStr, ok := record[p.opt.Time].(string); ok {
+				if timeStr == "" {
+					record["__time"] = time.Now().Unix() * 1000
+				} else {
 					loc, _ := time.LoadLocation("Asia/Shanghai")
 					format := ""
 					switch maps[p.opt.Time] {
 					case "time":
-						timeStr = fmt.Sprint(time.Now().Format("20060102"),  " ", timeStr)
+						timeStr = fmt.Sprint(time.Now().Format("20060102"), " ", timeStr)
 						format = "20060102 15:04:05"
 					case "year":
 						format = "2006"
@@ -279,50 +281,53 @@ func (p *processor) Receive(e processors.IPacket) error {
 						fmt.Println("date trans err:", err)
 						timeObj = time.Now()
 					}
-					record["__time"] = timeObj.Unix()*1000
+					record["__time"] = timeObj.Unix() * 1000
 				}
-			} else {
-				record["__time"] = time.Now().Unix()*1000
 			}
-
-			if p.opt.EventBy == "row" {
-				var e2 processors.IPacket = e.Clone()
-				e2.Fields().SetValueForPath(p.host, "host")
-				if len(p.opt.Var) > 0 {
-					e2.Fields().SetValueForPath(p.opt.Var, "var")
-				}
-
-				if p.opt.Target == "." {
-					for k, v := range record {
-						e2.Fields().SetValueForPath(v, k)
-					}
-				} else {
-					e2.Fields().SetValueForPath(record, p.opt.Target)
-				}
-
-				p.opt.ProcessCommonOptions(e2.Fields())
-				p.Send(e2)
-			} else {
-				records = append(records, record)
-			}
-		}
-		rows.Close()
-
-		if total == 0 {
-			return nil
+		} else {
+			record["__time"] = time.Now().Unix() * 1000
 		}
 
-		if p.opt.EventBy != "row" {
-			e.Fields().SetValueForPath(p.host, "host")
+		if p.opt.EventBy == "row" {
+			var e2 processors.IPacket = e.Clone()
+			e2.Fields().SetValueForPath(p.host, "host")
 			if len(p.opt.Var) > 0 {
-				e.Fields().SetValueForPath(p.opt.Var, "var")
+				e2.Fields().SetValueForPath(p.opt.Var, "var")
 			}
-			e.Fields().SetValueForPath(records, p.opt.Target)
 
-			p.opt.ProcessCommonOptions(e.Fields())
-			p.Send(e)
+			if p.opt.Target == "." {
+				for k, v := range record {
+					e2.Fields().SetValueForPath(v, k)
+				}
+			} else {
+				e2.Fields().SetValueForPath(record, p.opt.Target)
+			}
+
+			p.opt.ProcessCommonOptions(e2.Fields())
+			p.Send(e2)
+		} else {
+			records = append(records, record)
 		}
-		p.opt.Offset += int64(total)
+	}
+	rows.Close()
+
+	if total == 0 {
+		return nil
+	}
+
+	if p.opt.EventBy != "row" {
+		e.Fields().SetValueForPath(p.host, "host")
+		if len(p.opt.Var) > 0 {
+			e.Fields().SetValueForPath(p.opt.Var, "var")
+		}
+		e.Fields().SetValueForPath(records, p.opt.Target)
+
+		p.opt.ProcessCommonOptions(e.Fields())
+		p.Send(e)
+	}
+	p.opt.Offset += int64(total)
+	if total == batchSize {
+		return fmt.Errorf("goon")
 	}
 	return nil
 }

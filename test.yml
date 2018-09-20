@@ -2,27 +2,28 @@ input{
     sql {
         driver => "mysql"
         event_by =>"result"
-        statement => "SELECT * FROM sftp_record"
-        interval => "2"
-        connection_string => "root:123456.abcd@tcp(192.168.130.201:3306)/gaxz?charset=utf8"
+        statement => "SELECT * FROM "
+        interval => "20"
+        connection_string => "root:123456.abcd@tcp(192.168.131.124:3306)/gkzx?charset=utf8"
         target => "data"
-        time_field => "update_time"
+        time_field => "report_time"
     }
 }
 
 filter {
     mutate {
         remove_field => [ "@timestamp", "host"]
+        add_field => {
+            "__app" => "test"
+            "__type" => "test"
+        }
     }
 }
 
 output{
     http {
-        App => "test"
-        Type => "test"
         method => "post"
-        codec =>"json"
-        url =>"https://192.168.131.114:9005/search/bulk?by=all"
+        codec => "json"
+        url => "https://192.168.131.114:9005/search/bulk?by=all"
     }
 }
-

@@ -220,7 +220,16 @@ func (a *Agent) start() error {
 	if a.Schedule != "" {
 		Log().Debugf("agent %s : schedule=%s", a.Label, a.Schedule)
 		err := myScheduler.Add(a.PipelineUUID, a.Label, a.Schedule, func() {
-			go a.processor.Tick(newPacket(nil))
+			go func() {
+				str := "goon"
+				for str == "goon" {
+					str = ""
+					err := a.processor.Tick(newPacket(nil))
+					if err != nil {
+						str = err.Error()
+					}
+				}
+			}()
 			a.processor.B().Logger.Debugf("Scheduler ticked")
 		})
 		if err != nil {
